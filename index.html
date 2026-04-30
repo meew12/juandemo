@@ -821,6 +821,26 @@ footer{
   .nav-search{display:none}
   .kpi-grid{grid-template-columns:1fr 1fr}
 }
+/* ═══════════════════════════════
+   FOOTER (MODERNO)
+═══════════════════════════════ */
+.footer{background:#110f0d;color:#fff;padding:80px 40px 30px;margin-top:100px}
+.footer-container{max-width:1300px;margin:0 auto;display:grid;grid-template-columns:1.5fr 1fr 1fr 1.2fr;gap:60px}
+.footer-brand .nav-logo-text{color:#fff;margin-bottom:20px;display:block}
+.footer-about{color:rgba(255,255,255,.5);font-size:14px;line-height:1.6;margin-bottom:24px}
+.footer-socials{display:flex;gap:15px}
+.footer-socials a{width:36px;height:36px;background:rgba(255,255,255,.05);border-radius:50%;display:grid;place-items:center;color:#fff;transition:var(--transition)}
+.footer-socials a:hover{background:var(--c-accent);transform:translateY(-3px)}
+.footer-h4{font-size:16px;font-weight:700;margin-bottom:25px;font-family:'Sora'}
+.footer-links{list-style:none}
+.footer-links li{margin-bottom:12px}
+.footer-links a{color:rgba(255,255,255,.6);text-decoration:none;font-size:14px;transition:var(--transition)}
+.footer-links a:hover{color:var(--c-accent);padding-left:5px}
+.footer-newsletter p{font-size:14px;color:rgba(255,255,255,.5);margin-bottom:20px}
+.newsletter-form{display:flex;gap:10px}
+.newsletter-form input{flex:1;padding:12px;border-radius:8px;border:none;background:rgba(255,255,255,.05);color:#fff;font-size:14px;outline:none;border:1px solid rgba(255,255,255,.1)}
+.footer-bottom{max-width:1300px;margin:60px auto 0;padding-top:30px;border-top:1px solid rgba(255,255,255,.05);display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,.4);font-size:13px}
+  
 </style>
 </head>
 <body>
@@ -1667,38 +1687,53 @@ footer{
   </div>
 </div>
 
-<!-- ═══ FOOTER ═══ -->
-<footer id="site-footer" style="display:none">
-  <div class="footer-grid">
-    <div>
-      <div class="footer-brand">UMPI</div>
-      <div class="footer-desc">El marketplace más completo de Argentina. Comprá, vendé y contratá servicios de forma simple y segura.</div>
+<!-- FOOTER -->
+<footer class="footer">
+    <div class="footer-container">
+        <div class="footer-brand">
+            <a class="nav-logo-text">UMP<span>I</span></a>
+            <p class="footer-about">La plataforma integral más confiable de Argentina para conectar talentos, negocios y oportunidades en un entorno digital seguro.</p>
+            <div class="footer-socials">
+                <a href="#">f</a>
+                <a href="#">t</a>
+                <a href="#">ig</a>
+                <a href="#">in</a>
+            </div>
+        </div>
+        <div>
+            <h4 class="footer-h4">Marketplace</h4>
+            <ul class="footer-links">
+                <li><a href="#">Servicios Digitales</a></li>
+                <li><a href="#">Vehículos</a></li>
+                <li><a href="#">Propiedades</a></li>
+                <li><a href="#">Insumos</a></li>
+            </ul>
+        </div>
+        <div>
+            <h4 class="footer-h4">Empresa</h4>
+            <ul class="footer-links">
+                <li><a href="#">Sobre Nosotros</a></li>
+                <li><a href="#">Suscripciones</a></li>
+                <li><a href="#">Privacidad</a></li>
+                <li><a href="#">Contacto</a></li>
+            </ul>
+        </div>
+        <div class="footer-newsletter">
+            <h4 class="footer-h4">Suscribite</h4>
+            <p>Recibí las mejores ofertas y publicaciones destacadas en tu correo.</p>
+            <form class="newsletter-form">
+                <input type="email" placeholder="tu@email.com">
+                <button class="btn btn-primary">Unirse</button>
+            </form>
+        </div>
     </div>
-    <div>
-      <div class="footer-col-title">Explorar</div>
-      <a class="footer-link" onclick="showPage('servicios')">Servicios</a>
-      <a class="footer-link" onclick="showPage('autos')">Autos</a>
-      <a class="footer-link" onclick="showPage('propiedades')">Propiedades</a>
+    <div class="footer-bottom">
+        <p>&copy; 2026 UMPI Marketplace. Todos los derechos reservados.</p>
+        <div style="display: flex; gap: 20px;">
+            <span>Argentina</span>
+            <span>Español</span>
+        </div>
     </div>
-    <div>
-      <div class="footer-col-title">Empresa</div>
-      <a class="footer-link">Quiénes somos</a>
-      <a class="footer-link">Blog</a>
-      <a class="footer-link">Prensa</a>
-      <a class="footer-link">Empleos</a>
-    </div>
-    <div>
-      <div class="footer-col-title">Soporte</div>
-      <a class="footer-link">Centro de ayuda</a>
-      <a class="footer-link">Contacto</a>
-      <a class="footer-link">Términos de uso</a>
-      <a class="footer-link">Privacidad</a>
-    </div>
-  </div>
-  <div class="footer-bottom">
-    <span>© 2024 UMPI. Todos los derechos reservados.</span>
-    <span>Hecho en 🇦🇷 Argentina</span>
-  </div>
 </footer>
 
 <script>
