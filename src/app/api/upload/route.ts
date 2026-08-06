@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { writeFile, mkdir } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
-import crypto from "crypto";
+import sharp from "sharp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +25,7 @@ export async function POST(req: Request) {
     }
 
     if (files.length > 8) {
-      return NextResponse.json({ error: "Máximo 8 imágenes por publicación" }, { status: 400 });
+      return NextResponse.json({ error: "Máximo 8 imágenes" }, { status: 400 });
     }
 
     const ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
@@ -37,21 +34,16 @@ export async function POST(req: Request) {
     for (const file of files) {
       if (!ALLOWED_TYPES.includes(file.type)) {
         return NextResponse.json(
-          { error: `Archivo "${file.name}": tipo no permitido. Solo JPG, PNG, WebP` },
+          { error: `Archivo "${file.name}": solo JPG, PNG, WebP` },
           { status: 400 }
         );
       }
       if (file.size > MAX_SIZE) {
         return NextResponse.json(
-          { error: `Archivo "${file.name}": demasiado grande (máx 10MB)` },
+          { error: `Archivo "${file.name}": máx 10MB` },
           { status: 400 }
         );
       }
-    }
-
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    if (!existsSync(uploadDir)) {
-      await mkdir(uploadDir, { recursive: true });
     }
 
     const urls: string[] = [];
@@ -59,13 +51,22 @@ export async function POST(req: Request) {
     for (const file of files) {
       const bytes = await file.arrayBuffer();
       const buffer = Buffer.from(bytes);
-      const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 16);
-      const timestamp = Date.now();
-      const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-      const filename = `${timestamp}_${hash}.${ext}`;
-      const filepath = path.join(uploadDir, filename);
-      await writeFile(filepath, buffer);
-      urls.push(`/uploads/${filename}`);
+
+      try {
+        const processed = await sharp(buffer)
+          .resize(1200, 1200, { fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 80, progressive: true })
+          .toBuffer();
+
+        const base64 = processed.toString("base64");
+        const dataUrl = `data:image/jpeg;base64,${base64}`;
+        urls.push(dataUrl);
+      } catch (sharpError: any) {
+        const base64 = buffer.toString("base64");
+        const mime = file.type === "image/png" ? "image/png" : "image/webp";
+        const dataUrl = `data:${mime};base64,${base64}`;
+        urls.push(dataUrl);
+      }
     }
 
     return NextResponse.json({ success: true, urls, count: urls.length });
