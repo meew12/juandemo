@@ -1,0 +1,18 @@
+{
+  "name": "UMPI — Marketplace de Argentina",
+  "short_name": "UMPI",
+  "description": "El marketplace de servicios, autos y propiedades de Argentina",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ef",
+  "theme_color": "#e84c1e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
