@@ -204,6 +204,132 @@ no estaba disponible en build time), podés cargarlos manualmente:
 
 ---
 
+## 🚨 CARGA PARCIAL DETECTADA (después de arreglar el 401)
+
+Si después de arreglar el token, `/api/setup` te devuelve algo como:
+
+```json
+{"status":"partial","message":"18 statements ejecutados, 11 errores",
+ "stats":{"User":16,"Listing":0,"Plan":0,"Category":0,...},
+ "errors":["Stmt 4: ...table Category has no column named type",
+           "Stmt 6: ...table Plan has no column named description", ...]}
+```
+
+Y el login te dice "usuario o contraseña incorrecto" y el registro falla con 500...
+
+**Causa:** Las tablas se crearon con un schema viejo (faltan columnas como `type` en Category, `description` en Plan, etc.). Los usuarios se cargaron pero las publicaciones, planes y categorías no.
+
+### Solución (2 pasos)
+
+**Paso 1: Actualizá el código en GitHub**
+
+   Descargá el ZIP nuevo del **Preview Panel → `/downloads/umpi-marketplace.zip`** y subí los archivos a GitHub (reemplazando los viejos).
+
+   > ⚠️ IMPORTANTE: Necesitás el código nuevo porque tiene el schema correcto + la función de force-reset.
+
+**Paso 2: Forzar reset de la DB**
+
+   Esperá a que Vercel redeploye (1-2 min) y abrí en el navegador:
+
+   ```
+   https://TU-URL.vercel.app/api/setup?force=1
+   ```
+
+   Esto:
+   1. Borra TODAS las tablas viejas con schema desactualizado
+   2. Las recrea con el schema correcto (todas las columnas)
+   3. Carga los 299 registros (16 usuarios, 33 publicaciones, 3 planes, 27 categorías)
+
+   Vas a ver un JSON así:
+
+   ```json
+   {"status":"success","message":"29 statements ejecutados, 0 errores",
+    "stats":{"User":16,"Listing":33,"Plan":3,"Category":27,...}}
+   ```
+
+**Paso 3: Verificar**
+
+   - Abrí `https://TU-URL.vercel.app/api/diagnostico` → debe decir ✅ todo verde
+   - Abrí `https://TU-URL.vercel.app/` → la home debe cargar con publicaciones
+   - Probá loguearte: `admin@umpi.com.ar` / `admin123` → debe funcionar ✅
+
+---
+
+## 🚨 ERROR HTTP 401 (el más común)
+
+Si al abrir tu deploy en Vercel ves:
+- Pantalla que no carga datos (vacia)
+- Login/registro que NO funciona
+- `/api/setup` devuelve `"Server returned HTTP status 401"`
+- Mensaje `"No autenticado"` en cualquier endpoint
+
+**Causa casi segura:** Tu `DATABASE_URL` en Vercel NO tiene el `?authToken=xxx`.
+
+### Cómo diagnosticarlo (1 click)
+
+Abrí en el navegador:
+```
+https://TU-URL.vercel.app/api/diagnostico
+```
+
+Te va a mostrar una página clara con:
+- ✅/❌ Estado de cada variable de entorno
+- ✅/❌ Si la conexión a Turso funciona
+- 📋 El formato correcto de DATABASE_URL
+- 📋 Pasos exactos para arreglarlo
+
+### Cómo arreglarlo (2 minutos)
+
+**1. Conseguir tu token de Turso**
+
+   a. Andá a https://app.turso.com/app/tatabases
+   b. Hacé clic en tu base de datos (ej: `umpi-softw`)
+   c. Andá a la pestaña **Settings** → **Tokens**
+   d. Click **Create Token** → copiá el string largo que empieza con `eyJ...`
+
+**2. Actualizar variable en Vercel**
+
+   a. Andá a https://vercel.com → tu proyecto → **Settings** → **Environment Variables**
+   b. Buscá la variable `DATABASE_URL`
+   c. Editá su valor. Tiene que quedar así:
+
+   ```
+   libsql://umpi-softw.aws-us-west-2.turso.io?authToken=eyJ...TU_TOKEN_AQUI
+   ```
+
+   > ⚠️ **MUY IMPORTANTE:** Entre la URL y `?authToken=` NO tiene que haber espacios.
+
+   d. Click **Save**
+   e. Andá a **Deployments** → ⋮ del último deploy → **Redeploy**
+
+**3. Verificar**
+
+Esperá 1-2 min y abrí:
+```
+https://TU-URL.vercel.app/api/diagnostico
+```
+
+Debería decir ✅ "Conexión exitosa" + cantidad de usuarios.
+
+Después abrí:
+```
+https://TU-URL.vercel.app/api/setup
+```
+
+Va a crear las tablas y cargar los 299 registros.
+
+### Alternativa: variable separada
+
+Si preferís no tocar DATABASE_URL, podés agregar otra variable:
+
+| Name | Value |
+|------|-------|
+| `TURSO_AUTH_TOKEN` | `eyJ...TU_TOKEN_AQUI` |
+
+Y dejar `DATABASE_URL` solo con la URL (sin `?authToken=`).
+
+---
+
 ## 🆘 Si el deploy falla
 
 ### Error más común: Build fallido
