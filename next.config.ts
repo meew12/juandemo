@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // ─── Incluir el archivo SQL en el build para que /api/setup lo pueda leer ───
+  outputFileTracingIncludes: {
+    "/api/setup": ["./database/umpi_turso.sql"],
+  },
 };
 
 export default nextConfig;
