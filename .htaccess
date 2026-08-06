@@ -1,0 +1,55 @@
+# ════════════════════════════════════════════════════════════
+#  .htaccess — Rewrite para Phusion Passenger (cPanel/GoDaddy)
+# ════════════════════════════════════════════════════════════
+#  Este archivo va en public_html/ (la raíz pública del dominio).
+#  Le dice a Apache que redirija TODAS las peticiones HTTP al
+#  proceso Node.js que Passenger mantiene vivo en el backend.
+#
+#  cPanel lo genera automáticamente al crear la app Node.js desde
+#  "Setup Node.js App". Si por algún motivo no se crea, usá este.
+# ════════════════════════════════════════════════════════════
+
+# Activar motor de reescritura
+RewriteEngine On
+
+# Forzar HTTPS (descomentar cuando tengas certificado SSL instalado)
+# RewriteCond %{HTTPS} !=on
+# RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Redirigir TODO el tráfico al Passenger Node.js app
+# Esto lo hace cPanel automáticamente, pero lo dejamos explícito
+RewriteRule ^$ / [L,QSA]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ /$1 [L,QSA]
+
+# Cabeceras de seguridad básicas
+Header set X-Content-Type-Options "nosniff"
+Header set X-Frame-Options "SAMEORIGIN"
+Header set X-XSS-Protection "1; mode=block"
+
+# Compresión GZIP
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Cache de assets estáticos (1 año)
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType image/jpeg "access plus 1 year"
+  ExpiresByType image/png "access plus 1 year"
+  ExpiresByType image/webp "access plus 1 year"
+  ExpiresByType image/svg+xml "access plus 1 year"
+  ExpiresByType text/css "access plus 1 month"
+  ExpiresByType application/javascript "access plus 1 month"
+  ExpiresByType font/woff2 "access plus 1 year"
+</IfModule>
+
+# Bloquear acceso a archivos sensibles
+<FilesMatch "(^\.|\.(env|git|md|sql|zip|log)$)">
+  Require all denied
+</FilesMatch>
+
+# Página de error personalizada (opcional)
+ErrorDocument 403 /403.html
+ErrorDocument 404 /404.html

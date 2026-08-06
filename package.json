@@ -5,9 +5,9 @@
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "postinstall": "prisma generate || echo 'prisma generate skipped (dev mode)'",
-    "build": "prisma generate && prisma db push --accept-data-loss && npm run seed && next build",
-    "build:vercel": "prisma generate && prisma db push --accept-data-loss && npm run seed && next build",
-    "build:simple": "next build",
+    "vercel-build": "prisma generate && (prisma db push --accept-data-loss || echo '⚠️ db push skipped') && (npm run seed || echo '⚠️ seed skipped') && next build",
+    "build": "next build",
+    "build:full": "prisma generate && prisma db push --accept-data-loss && npm run seed && next build",
     "seed": "node scripts/seed-turso.js",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",

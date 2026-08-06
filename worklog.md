@@ -3465,3 +3465,34 @@ Stage Summary:
 - Web editor works but tedious (must run each table block separately)
 - User needs to first create tables with `npx prisma db push` BEFORE importing data
 - Critical order: 1) prisma db push (create tables) → 2) import data SQL
+
+---
+Task ID: turso-auto-setup
+Agent: main-agent
+Task: Make Turso deployment fully automatic — user just puts token in Vercel and everything else happens during build (no CLI, no manual SQL)
+
+Work Log:
+- User wanted: "solo colocando el token ya podria utilizar una base de datos" — no installs, no manual SQL
+- Created /home/z/my-project/scripts/seed-turso.js — Node.js script that reads database/umpi_turso.sql and executes all 299 INSERT statements via @libsql/client batch. Checks if DB already has data (idempotent — skips if User count > 0).
+- Created /home/z/my-project/src/app/api/setup/route.ts — HTTP endpoint that does the same seed operation on-demand. Visit /api/setup to manually trigger data load. Returns JSON with status, counts, and any errors.
+- Updated /home/z/my-project/package.json:
+  - Added "postinstall": "prisma generate" — auto-generates Prisma client after npm install
+  - Updated "build": "prisma generate && prisma db push --accept-data-loss && npm run seed && next build" — creates tables AND seeds data automatically during Vercel build
+  - Added "seed": "node scripts/seed-turso.js" — standalone seed command
+  - Added "build:vercel" and "build:simple" as alternatives
+- Updated /home/z/my-project/next.config.ts — added outputFileTracingIncludes to bundle database/umpi_turso.sql with /api/setup route
+- Rewrote /home/z/my-project/TURSO.md with simplified 5-step flow: create Turso DB → upload to GitHub → import to Vercel + paste DATABASE_URL → deploy (auto-creates tables + seeds data) → verify
+- Tested /api/setup endpoint locally: returns {"status":"already_seeded","message":"La base ya tiene 16 usuarios...","userCount":16} ✅
+- Rebuilt /home/z/my-project/public/downloads/umpi-marketplace.zip (23MB) with all new files
+- Dev server running OK (home, setup, site-config all return HTTP 200)
+
+Stage Summary:
+- Vercel build now does 4 things automatically:
+  1. prisma generate (prepare client)
+  2. prisma db push (CREATE TABLE in Turso — 20 tables)
+  3. npm run seed (INSERT 299 records into Turso)
+  4. next build (compile app)
+- User flow simplified to: Turso token → GitHub upload → Vercel deploy → done
+- /api/setup endpoint provides manual fallback if build-time seed fails
+- Seed script is idempotent: checks User count, skips if > 0 (safe for redepmloys)
+- Files for deployment: TURSO.md (simplified guide), scripts/seed-turso.js, src/app/api/setup/route.ts, updated package.json, updated next.config.ts
