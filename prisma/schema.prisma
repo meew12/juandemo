@@ -10,7 +10,9 @@ generator client {
 
 datasource db {
   provider = "sqlite"
-  url      = env("DATABASE_URL")
+  // La URL real se pasa via adapter en src/lib/db.ts
+  // Este valor es solo un placeholder para que prisma generate funcione
+  url      = "file:./db/custom.db"
 }
 
 // ─────────────────────────── USUARIOS ───────────────────────────
