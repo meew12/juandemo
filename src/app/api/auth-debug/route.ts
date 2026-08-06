@@ -1,178 +1,114 @@
-// ════════════════════════════════════════════════════════════
-//  /api/auth-debug — Diagnóstico específico de login
-//  Visita /api/auth-debug?email=admin@umpi.com.ar&password=admin123
-//  para ver exactamente POR QUÉ falla el login
-// ════════════════════════════════════════════════════════════
-
+// /api/auth-debug - Diagnostico de login (AUTOCONTENIDO)
 import { NextResponse } from "next/server";
-import { findUserByEmail } from "@/lib/db-raw";
 import bcrypt from "bcryptjs";
+import { createClient, type Client } from "@libsql/client";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
+let _client: Client | undefined;
+
+function getDbClient(): Client {
+  if (_client) return _client;
+  const databaseUrl = process.env.DATABASE_URL ?? "";
+  if (!databaseUrl || databaseUrl === "undefined") {
+    _client = createClient({ url: "file:./db/custom.db" });
+    return _client;
+  }
+  let url = databaseUrl;
+  let authToken = process.env.TURSO_AUTH_TOKEN;
+  if (url.includes("authToken=")) {
+    try {
+      const u = new URL(url);
+      authToken = u.searchParams.get("authToken") ?? authToken;
+      u.searchParams.delete("authToken");
+      url = u.toString();
+    } catch {
+      url = url.replace(/\?authToken=.*$/, "").replace(/&authToken=[^&]*/, "");
+    }
+  }
+  const isTurso = url.startsWith("libsql://") || url.startsWith("libsql+ws://");
+  _client = createClient({ url, authToken: isTurso ? authToken : undefined });
+  return _client;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const email = (searchParams.get("email") || "admin@umpi.com.ar").toLowerCase().trim();
   const password = searchParams.get("password") || "admin123";
-
   const steps: { step: string; ok: boolean; detail: string }[] = [];
 
-  // ─── Paso 0: Verificar variables de entorno ───
   const hasDbUrl = !!process.env.DATABASE_URL;
   const hasSecret = !!process.env.NEXTAUTH_SECRET;
   steps.push({
     step: "0. Variables de entorno",
     ok: hasDbUrl && hasSecret,
-    detail: `DATABASE_URL=${hasDbUrl ? "✓" : "✗"} NEXTAUTH_SECRET=${hasSecret ? "✓" : "✗"}`,
+    detail: `DATABASE_URL=${hasDbUrl ? "OK" : "FALTA"} NEXTAUTH_SECRET=${hasSecret ? "OK" : "FALTA"}`,
   });
 
-  // ─── Paso 1: ¿Existe el usuario en la DB? (usando libsql directo) ───
   let user: any = null;
   try {
-    user = await findUserByEmail(email);
-
-    if (user) {
-      steps.push({
-        step: "1. Buscar usuario en DB",
-        ok: true,
-        detail: `Encontrado: id=${user.id.substring(0, 12)}..., email=${user.email}, role=${user.role}, plan=${user.plan}`,
-      });
+    const client = getDbClient();
+    const result = await client.execute({
+      sql: `SELECT id, email, name, lastName, passwordHash, role, plan, banned, verified FROM User WHERE email = ? LIMIT 1`,
+      args: [email],
+    });
+    if (result.rows.length > 0) {
+      const r = result.rows[0];
+      user = {
+        id: String(r.id), email: String(r.email),
+        passwordHash: r.passwordHash === null ? null : String(r.passwordHash),
+        role: String(r.role), plan: String(r.plan),
+        banned: Boolean(r.banned),
+      };
+      steps.push({ step: "1. Buscar usuario en DB", ok: true, detail: `Encontrado: ${user.email}, role=${user.role}` });
     } else {
-      steps.push({
-        step: "1. Buscar usuario en DB",
-        ok: false,
-        detail: `No se encontró ningún usuario con email "${email}"`,
-      });
+      steps.push({ step: "1. Buscar usuario en DB", ok: false, detail: `No se encontro "${email}"` });
       return NextResponse.json({ email, steps, conclusion: "USER_NOT_FOUND" });
     }
   } catch (e: any) {
-    steps.push({
-      step: "1. Buscar usuario en DB",
-      ok: false,
-      detail: `Error de DB: ${e.message}`,
-    });
+    steps.push({ step: "1. Buscar usuario en DB", ok: false, detail: `Error: ${e.message}` });
     return NextResponse.json({ email, steps, conclusion: "DB_ERROR", error: e.message });
   }
 
-  // ─── Paso 2: ¿Está baneado? ───
   if (user.banned) {
-    steps.push({
-      step: "2. Verificar si está baneado",
-      ok: false,
-      detail: `Usuario BANEADO. El login falla porque user.banned = true`,
-    });
+    steps.push({ step: "2. Baneado", ok: false, detail: "BANEADO" });
     return NextResponse.json({ email, steps, conclusion: "USER_BANNED" });
   }
-  steps.push({
-    step: "2. Verificar si está baneado",
-    ok: true,
-    detail: "user.banned = false ✓",
-  });
+  steps.push({ step: "2. Baneado", ok: true, detail: "no baneado" });
 
-  // ─── Paso 3: ¿Tiene passwordHash? ───
   if (!user.passwordHash) {
-    steps.push({
-      step: "3. Verificar passwordHash",
-      ok: false,
-      detail: "passwordHash es NULL. El usuario no tiene contraseña configurada.",
-    });
+    steps.push({ step: "3. passwordHash", ok: false, detail: "NULL" });
     return NextResponse.json({ email, steps, conclusion: "NO_PASSWORD_HASH" });
   }
-  steps.push({
-    step: "3. Verificar passwordHash",
-    ok: true,
-    detail: `passwordHash presente: ${user.passwordHash.substring(0, 20)}... (longitud: ${user.passwordHash.length})`,
-  });
+  steps.push({ step: "3. passwordHash", ok: true, detail: `presente (len=${user.passwordHash.length})` });
 
-  // ─── Paso 4: ¿El formato del hash es válido? ───
   const hashFormat = /^\$2[abxy]\$\d+\$/.test(user.passwordHash);
   if (!hashFormat) {
-    steps.push({
-      step: "4. Validar formato bcrypt",
-      ok: false,
-      detail: `El hash NO tiene formato bcrypt válido. Debería empezar con $2b$10$... pero empieza con: ${user.passwordHash.substring(0, 10)}`,
-    });
+    steps.push({ step: "4. Formato bcrypt", ok: false, detail: "invalido" });
     return NextResponse.json({ email, steps, conclusion: "INVALID_HASH_FORMAT" });
   }
-  steps.push({
-    step: "4. Validar formato bcrypt",
-    ok: true,
-    detail: "Formato bcrypt válido ✓",
-  });
+  steps.push({ step: "4. Formato bcrypt", ok: true, detail: "valido" });
 
-  // ─── Paso 5: ¿bcrypt.compare da true? ───
   try {
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
-      steps.push({
-        step: "5. Comparar contraseña",
-        ok: false,
-        detail: `bcrypt.compare("${password}", hash) = FALSE. La contraseña NO coincide con el hash.`,
-      });
-      // Probar también con variantes por las dudas
-      const variants = [
-        password.toLowerCase(),
-        password.toUpperCase(),
-        "admin123",
-        "user123",
-        "umpi123",
-      ];
-      const tried: string[] = [];
-      for (const v of variants) {
-        const matches = await bcrypt.compare(v, user.passwordHash);
-        tried.push(`${v}=${matches ? "✓" : "✗"}`);
-      }
-      steps.push({
-        step: "5b. Probar variantes de contraseña",
-        ok: false,
-        detail: `Probé: ${tried.join(", ")}`,
-      });
+      steps.push({ step: "5. bcrypt.compare", ok: false, detail: "FALSE" });
       return NextResponse.json({ email, steps, conclusion: "PASSWORD_MISMATCH" });
     }
-    steps.push({
-      step: "5. Comparar contraseña",
-      ok: true,
-      detail: `bcrypt.compare("${password}", hash) = TRUE ✓`,
-    });
+    steps.push({ step: "5. bcrypt.compare", ok: true, detail: "TRUE" });
   } catch (e: any) {
-    steps.push({
-      step: "5. Comparar contraseña",
-      ok: false,
-      detail: `Error en bcrypt.compare: ${e.message}`,
-    });
-    return NextResponse.json({ email, steps, conclusion: "BCRYPT_ERROR", error: e.message });
+    steps.push({ step: "5. bcrypt.compare", ok: false, detail: e.message });
+    return NextResponse.json({ email, steps, conclusion: "BCRYPT_ERROR" });
   }
 
-  // ─── Paso 6: ¿NEXTAUTH_SECRET está configurado? ───
   if (!hasSecret) {
-    steps.push({
-      step: "6. Verificar NEXTAUTH_SECRET",
-      ok: false,
-      detail: "NEXTAUTH_SECRET NO está configurado. Esto causa JWEDecryptionFailed.",
-    });
+    steps.push({ step: "6. NEXTAUTH_SECRET", ok: false, detail: "FALTA" });
     return NextResponse.json({ email, steps, conclusion: "NO_NEXTAUTH_SECRET" });
   }
-  steps.push({
-    step: "6. Verificar NEXTAUTH_SECRET",
-    ok: true,
-    detail: `NEXTAUTH_SECRET configurado ✓ (${(process.env.NEXTAUTH_SECRET || "").substring(0, 4)}***, longitud: ${(process.env.NEXTAUTH_SECRET || "").length})`,
-  });
+  steps.push({ step: "6. NEXTAUTH_SECRET", ok: true, detail: "OK" });
 
-  // ─── Conclusión ───
-  steps.push({
-    step: "✓ Conclusión",
-    ok: true,
-    detail: "TODO BIEN. El login DEBERÍA funcionar. Si sigue fallando, el problema es del browser (sesión cacheada). Probá en modo incógnito o limpiá cookies.",
-  });
-
-  return NextResponse.json({
-    email,
-    password: password,
-    steps,
-    conclusion: "ALL_CHECKS_PASSED",
-    hint:
-      "Si el login sigue fallando en el browser, abrí una ventana de incógnito y probá ahí. Las cookies viejas de NextAuth pueden causar problemas.",
-  });
+  steps.push({ step: "Conclusion", ok: true, detail: "TODO BIEN. Login deberia funcionar." });
+  return NextResponse.json({ email, steps, conclusion: "ALL_CHECKS_PASSED" });
 }
