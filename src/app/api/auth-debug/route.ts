@@ -5,7 +5,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { findUserByEmail } from "@/lib/db-raw";
 import bcrypt from "bcryptjs";
 
 export const runtime = "nodejs";
@@ -19,22 +19,19 @@ export async function GET(request: Request) {
 
   const steps: { step: string; ok: boolean; detail: string }[] = [];
 
-  // ─── Paso 1: ¿Existe el usuario en la DB? ───
+  // ─── Paso 0: Verificar variables de entorno ───
+  const hasDbUrl = !!process.env.DATABASE_URL;
+  const hasSecret = !!process.env.NEXTAUTH_SECRET;
+  steps.push({
+    step: "0. Variables de entorno",
+    ok: hasDbUrl && hasSecret,
+    detail: `DATABASE_URL=${hasDbUrl ? "✓" : "✗"} NEXTAUTH_SECRET=${hasSecret ? "✓" : "✗"}`,
+  });
+
+  // ─── Paso 1: ¿Existe el usuario en la DB? (usando libsql directo) ───
   let user: any = null;
   try {
-    user = await db.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        plan: true,
-        banned: true,
-        verified: true,
-        passwordHash: true,
-      },
-    });
+    user = await findUserByEmail(email);
 
     if (user) {
       steps.push({
@@ -122,7 +119,7 @@ export async function GET(request: Request) {
         "user123",
         "umpi123",
       ];
-      const tried = [];
+      const tried: string[] = [];
       for (const v of variants) {
         const matches = await bcrypt.compare(v, user.passwordHash);
         tried.push(`${v}=${matches ? "✓" : "✗"}`);
@@ -149,7 +146,6 @@ export async function GET(request: Request) {
   }
 
   // ─── Paso 6: ¿NEXTAUTH_SECRET está configurado? ───
-  const hasSecret = !!process.env.NEXTAUTH_SECRET;
   if (!hasSecret) {
     steps.push({
       step: "6. Verificar NEXTAUTH_SECRET",
@@ -161,7 +157,7 @@ export async function GET(request: Request) {
   steps.push({
     step: "6. Verificar NEXTAUTH_SECRET",
     ok: true,
-    detail: `NEXTAUTH_SECRET configurado ✓ (${process.env.NEXTAUTH_SECRET.substring(0, 4)}***, longitud: ${process.env.NEXTAUTH_SECRET.length})`,
+    detail: `NEXTAUTH_SECRET configurado ✓ (${(process.env.NEXTAUTH_SECRET || "").substring(0, 4)}***, longitud: ${(process.env.NEXTAUTH_SECRET || "").length})`,
   });
 
   // ─── Conclusión ───

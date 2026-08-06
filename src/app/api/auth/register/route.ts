@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
+import { findUserByEmail, createUser, getRawClient } from "@/lib/db-raw";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 export async function POST(req: Request) {
   try {
@@ -13,32 +17,45 @@ export async function POST(req: Request) {
       );
     }
 
-    const existing = await db.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
+    // ─── Verificar si ya existe (usando libsql directo) ───
+    const existing = await findUserByEmail(email);
     if (existing) {
-      return NextResponse.json({ error: "Ya existe una cuenta con ese email" }, { status: 409 });
+      return NextResponse.json(
+        { error: "Ya existe una cuenta con ese email" },
+        { status: 409 }
+      );
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
     const initials = ((name?.[0] || "U") + (lastName?.[0] || "")).toUpperCase();
 
-    await db.user.create({
-      data: {
-        email: email.toLowerCase(),
-        name: name || "",
-        lastName: lastName || "",
-        passwordHash,
-        role: "user",
-        plan: "basico",
-        verified: false,
-        avatarInitials: initials,
-      },
+    // ─── Crear usuario (usando libsql directo) ───
+    const user = await createUser({
+      email,
+      name: name || "",
+      lastName: lastName || "",
+      passwordHash,
+      role: "user",
+      plan: "basico",
     });
 
-    return NextResponse.json({ success: true });
+    // ─── Actualizar avatarInitials por separado ───
+    try {
+      const client = getRawClient();
+      await client.execute({
+        sql: `UPDATE User SET avatarInitials = ? WHERE id = ?`,
+        args: [initials, user.id],
+      });
+    } catch (e: any) {
+      console.warn("[register] No se pudo actualizar avatarInitials:", e.message);
+    }
+
+    return NextResponse.json({ success: true, userId: user.id });
   } catch (err: any) {
-    console.error("Register error:", err);
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
+    console.error("Register error:", err.message);
+    return NextResponse.json(
+      { error: "Error interno del servidor: " + err.message },
+      { status: 500 }
+    );
   }
 }
