@@ -3413,3 +3413,55 @@ Stage Summary:
 - Rebuilt /home/z/my-project/public/downloads/umpi-database.zip (61 KB, 4 SQL files: umpi_full.sql, umpi_data.sql, umpi_schema.sql, umpi_tidb.sql)
 - Rebuilt /home/z/my-project/public/downloads/umpi-marketplace.zip (23 MB, 398 files) — now includes TIDB.md (deploy guide), database/umpi_tidb.sql (TiDB dump), and scripts/build_tidb_sql.py (regeneration script) in addition to existing DEPLOY.md / FIX-500.md / VERCEL.md / app.js / prisma schemas / source code
 - User can now follow TIDB.md guide: create TiDB Cloud Serverless cluster → paste umpi_tidb.sql into SQL Editor → run → connect Vercel app with the TiDB connection string
+
+---
+Task ID: turso-integration
+Agent: main-agent
+Task: Add Turso (libSQL) support as alternative to TiDB - simpler setup since app originally uses SQLite
+
+Work Log:
+- Installed @prisma/adapter-libsql@7.9.1 and @libsql/client@0.17.4 via bun add
+- Modified /home/z/my-project/src/lib/db.ts to support BOTH SQLite local (file:) and Turso remote (libsql://) via automatic detection in DATABASE_URL
+- Updated /home/z/my-project/prisma/schema.prisma: added previewFeatures = ["driverAdapters"] to generator client (required for libSQL adapter)
+- Fixed initial error: export name is PrismaLibSql (lowercase ql), not PrismaLibSQL
+- Created /home/z/my-project/scripts/export-sqlite-to-turso.ts - exports local SQLite data to libSQL-compatible SQL dump
+- Ran script: generated /home/z/my-project/database/umpi_turso.sql (93 KB, 299 records, 19 tables)
+- Created /home/z/my-project/TURSO.md with complete 7-step deployment guide for Vercel + Turso
+- Verified dev server endpoints all return HTTP 200 (site-config, testimonials, listings, home)
+- Rebuilt /home/z/my-project/public/downloads/umpi-marketplace.zip (23MB) including TURSO.md, umpi_turso.sql, updated db.ts, updated schema.prisma
+- Rebuilt /home/z/my-project/public/downloads/umpi-database.zip (5 SQL files now: full, data, schema, tidb, turso)
+
+Stage Summary:
+- Turso integration complete - simpler than TiDB because:
+  1. NO schema changes needed (already SQLite)
+  2. NO package installs needed on Vercel side (already in package.json)
+  3. NO SQL conversion needed (SQLite = libSQL native)
+  4. Only 1 connection string needed (URL+token in DATABASE_URL)
+  5. Better Vercel integration (edge-friendly)
+- Architecture: src/lib/db.ts auto-detects DATABASE_URL scheme:
+  - libsql:// → uses PrismaLibSql adapter (Turso production)
+  - file: → uses standard PrismaClient (local dev SQLite)
+- Files for deployment: TURSO.md (guide), database/umpi_turso.sql (data dump), src/lib/db.ts (adapter logic), prisma/schema.prisma (preview feature enabled)
+- Plan free tier: 9 GB storage, 500 DBs, edge global, Buenos Aires region available
+- User now has 3 deployment options documented: cPanel (DEPLOY.md), Vercel+TiDB (TIDB.md/VERCEL.md), Vercel+Turso (TURSO.md)
+
+---
+Task ID: turso-import-fix
+Agent: main-agent
+Task: User got "select multiple statements to run in transaction" message when pasting SQL in Turso web SQL editor
+
+Work Log:
+- Identified cause: Turso web SQL editor only runs the statement at cursor position by default — to run multiple statements user must SELECT them and click "Run Selection"
+- Created /home/z/my-project/TURSO-IMPORT.md with 3 alternative import methods:
+  1. Turso CLI (recommended): turso db shell umpi < database/umpi_turso.sql — runs everything in 5 sec
+  2. Web editor with "Run Selection": paste each table block separately, select all, click Run Selection — 10-15 min
+  3. Node.js script: import data programmatically with @libsql/client
+- Included verification queries: SELECT COUNT(*) FROM User (16), Listing (33), Plan (3), Category (27)
+- Rebuilt /home/z/my-project/public/downloads/umpi-marketplace.zip with TURSO-IMPORT.md
+- Dev server still OK on port 3000
+
+Stage Summary:
+- Best UX: Turso CLI — install + login + turso db shell umpi < umpi_turso.sql = done in 30 sec
+- Web editor works but tedious (must run each table block separately)
+- User needs to first create tables with `npx prisma db push` BEFORE importing data
+- Critical order: 1) prisma db push (create tables) → 2) import data SQL
