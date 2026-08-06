@@ -7,6 +7,12 @@
 //  2. Verifica si ya hay datos (idempotente)
 //  3. Si no hay datos, carga los 299 registros
 //  4. Devuelve un JSON con el estado
+//
+//  IMPORTANTE: Esta ruta detecta automáticamente el authToken
+//  desde:
+//    a) ?authToken=xxx en DATABASE_URL, o
+//    b) variable separada TURSO_AUTH_TOKEN
+//  Si falta, devuelve instrucciones claras con el formato correcto.
 // ════════════════════════════════════════════════════════════
 
 import { createClient } from "@libsql/client";
@@ -19,7 +25,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // 60 segundos para operaciones de BD
 
 // ─── Schema SQLite para crear las tablas ───
-// Generado a partir de prisma/schema.prisma
+// Sincronizado EXACTAMENTE con prisma/schema.prisma y database/umpi_turso.sql
 const SCHEMA_SQL = `
 -- Tabla User
 CREATE TABLE IF NOT EXISTS \`User\` (
@@ -71,18 +77,20 @@ CREATE TABLE IF NOT EXISTS \`Session\` (
 CREATE TABLE IF NOT EXISTS \`VerificationToken\` (
   \`identifier\` TEXT NOT NULL,
   \`token\` TEXT NOT NULL UNIQUE,
-  \`expires\` TEXT NOT NULL
+  \`expires\` TEXT NOT NULL,
+  UNIQUE(\`identifier\`, \`token\`)
 );
 
 -- Tabla Category
 CREATE TABLE IF NOT EXISTS \`Category\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
-  \`name\` TEXT NOT NULL,
   \`slug\` TEXT NOT NULL UNIQUE,
+  \`name\` TEXT NOT NULL,
+  \`type\` TEXT NOT NULL,
   \`icon\` TEXT,
-  \`parentId\` TEXT,
+  \`description\` TEXT,
+  \`count\` INTEGER NOT NULL DEFAULT 0,
   \`order\` INTEGER NOT NULL DEFAULT 0,
-  \`featured\` INTEGER NOT NULL DEFAULT 0,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -90,10 +98,10 @@ CREATE TABLE IF NOT EXISTS \`Category\` (
 -- Tabla Subcategory
 CREATE TABLE IF NOT EXISTS \`Subcategory\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
+  \`categoryId\` TEXT NOT NULL,
   \`name\` TEXT NOT NULL,
   \`slug\` TEXT NOT NULL,
-  \`categoryId\` TEXT NOT NULL,
-  \`icon\` TEXT,
+  \`count\` INTEGER NOT NULL DEFAULT 0,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(\`categoryId\`, \`slug\`)
@@ -102,15 +110,24 @@ CREATE TABLE IF NOT EXISTS \`Subcategory\` (
 -- Tabla Plan
 CREATE TABLE IF NOT EXISTS \`Plan\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
-  \`name\` TEXT NOT NULL,
   \`slug\` TEXT NOT NULL UNIQUE,
+  \`name\` TEXT NOT NULL,
   \`price\` REAL NOT NULL,
   \`currency\` TEXT NOT NULL DEFAULT 'ARS',
   \`interval\` TEXT NOT NULL DEFAULT 'month',
-  \`featured\` INTEGER NOT NULL DEFAULT 0,
+  \`description\` TEXT,
+  \`features\` TEXT NOT NULL DEFAULT '[]',
+  \`maxListings\` INTEGER NOT NULL DEFAULT 1,
+  \`maxFeatured\` INTEGER NOT NULL DEFAULT 0,
+  \`badgeVerified\` INTEGER NOT NULL DEFAULT 0,
+  \`top10Access\` INTEGER NOT NULL DEFAULT 0,
+  \`multiUser\` INTEGER NOT NULL DEFAULT 1,
+  \`apiAccess\` INTEGER NOT NULL DEFAULT 0,
+  \`prioritySupport\` INTEGER NOT NULL DEFAULT 0,
+  \`monthlyReport\` INTEGER NOT NULL DEFAULT 0,
+  \`invoiceType\` TEXT,
   \`active\` INTEGER NOT NULL DEFAULT 1,
-  \`limits\` TEXT NOT NULL DEFAULT '{}',
-  \`benefits\` TEXT NOT NULL DEFAULT '[]',
+  \`order\` INTEGER NOT NULL DEFAULT 0,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -118,20 +135,32 @@ CREATE TABLE IF NOT EXISTS \`Plan\` (
 -- Tabla Listing
 CREATE TABLE IF NOT EXISTS \`Listing\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
-  \`userId\` TEXT NOT NULL,
-  \`categoryId\` TEXT,
+  \`slug\` TEXT NOT NULL UNIQUE,
   \`title\` TEXT NOT NULL,
-  \`slug\` TEXT NOT NULL,
   \`description\` TEXT NOT NULL,
-  \`price\` REAL,
+  \`categoryType\` TEXT NOT NULL,
+  \`categoryId\` TEXT,
+  \`subcategoryId\` TEXT,
+  \`price\` REAL NOT NULL,
   \`currency\` TEXT NOT NULL DEFAULT 'ARS',
+  \`priceUnit\` TEXT,
+  \`location\` TEXT,
+  \`zone\` TEXT,
+  \`province\` TEXT,
   \`images\` TEXT NOT NULL DEFAULT '[]',
   \`thumbs\` TEXT NOT NULL DEFAULT '[]',
   \`attrs\` TEXT NOT NULL DEFAULT '{}',
-  \`status\` TEXT NOT NULL DEFAULT 'active',
-  \`featured\` INTEGER NOT NULL DEFAULT 0,
+  \`rating\` REAL NOT NULL DEFAULT 0,
+  \`reviewCount\` INTEGER NOT NULL DEFAULT 0,
   \`views\` INTEGER NOT NULL DEFAULT 0,
-  \`expiresAt\` TEXT,
+  \`contactCount\` INTEGER NOT NULL DEFAULT 0,
+  \`badge\` TEXT,
+  \`featured\` INTEGER NOT NULL DEFAULT 0,
+  \`featuredUntil\` TEXT,
+  \`boostLevel\` INTEGER NOT NULL DEFAULT 0,
+  \`status\` TEXT NOT NULL DEFAULT 'active',
+  \`rejectionReason\` TEXT,
+  \`sellerId\` TEXT NOT NULL,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -139,12 +168,14 @@ CREATE TABLE IF NOT EXISTS \`Listing\` (
 -- Tabla Review
 CREATE TABLE IF NOT EXISTS \`Review\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
+  \`listingId\` TEXT NOT NULL,
   \`userId\` TEXT NOT NULL,
-  \`listingId\` TEXT,
   \`rating\` INTEGER NOT NULL,
-  \`comment\` TEXT,
+  \`comment\` TEXT NOT NULL,
+  \`status\` TEXT NOT NULL DEFAULT 'active',
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(\`listingId\`, \`userId\`)
 );
 
 -- Tabla Favorite
@@ -178,10 +209,14 @@ CREATE TABLE IF NOT EXISTS \`Message\` (
 CREATE TABLE IF NOT EXISTS \`Subscription\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
   \`userId\` TEXT NOT NULL,
-  \`planId\` TEXT NOT NULL,
+  \`plan\` TEXT NOT NULL,
   \`status\` TEXT NOT NULL DEFAULT 'active',
+  \`startDate\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`currentPeriodEnd\` TEXT,
-  \`cancelAt\` TEXT,
+  \`cancelAtPeriodEnd\` INTEGER NOT NULL DEFAULT 0,
+  \`mercadopagoId\` TEXT,
+  \`mercadopagoPreapprovalId\` TEXT,
+  \`amount\` REAL NOT NULL DEFAULT 0,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -191,21 +226,32 @@ CREATE TABLE IF NOT EXISTS \`Boost\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
   \`listingId\` TEXT NOT NULL,
   \`userId\` TEXT NOT NULL,
-  \`days\` INTEGER NOT NULL,
-  \`expiresAt\` TEXT NOT NULL,
-  \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  \`type\` TEXT NOT NULL,
+  \`durationDays\` INTEGER NOT NULL,
+  \`amount\` REAL NOT NULL DEFAULT 0,
+  \`status\` TEXT NOT NULL DEFAULT 'pending',
+  \`startDate\` TEXT,
+  \`endDate\` TEXT,
+  \`mercadopagoPaymentId\` TEXT,
+  \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Tabla Transaction
 CREATE TABLE IF NOT EXISTS \`Transaction\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
+  \`txId\` TEXT NOT NULL UNIQUE,
   \`userId\` TEXT NOT NULL,
-  \`type\` TEXT NOT NULL,
+  \`subscriptionId\` TEXT,
+  \`boostId\` TEXT,
+  \`concept\` TEXT NOT NULL,
+  \`method\` TEXT NOT NULL,
   \`amount\` REAL NOT NULL,
   \`currency\` TEXT NOT NULL DEFAULT 'ARS',
   \`status\` TEXT NOT NULL DEFAULT 'pending',
-  \`reference\` TEXT,
-  \`metadata\` TEXT,
+  \`mercadopagoPaymentId\` TEXT,
+  \`mercadopagoPreferenceId\` TEXT,
+  \`invoiceType\` TEXT,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -214,11 +260,12 @@ CREATE TABLE IF NOT EXISTS \`Transaction\` (
 CREATE TABLE IF NOT EXISTS \`Report\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
   \`reporterId\` TEXT NOT NULL,
+  \`reportedUserId\` TEXT,
   \`listingId\` TEXT,
-  \`userId\` TEXT,
   \`reason\` TEXT NOT NULL,
   \`description\` TEXT,
-  \`status\` TEXT NOT NULL DEFAULT 'pending',
+  \`status\` TEXT NOT NULL DEFAULT 'open',
+  \`resolution\` TEXT,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -229,10 +276,9 @@ CREATE TABLE IF NOT EXISTS \`Notification\` (
   \`userId\` TEXT NOT NULL,
   \`type\` TEXT NOT NULL,
   \`title\` TEXT NOT NULL,
-  \`message\` TEXT NOT NULL,
-  \`read\` INTEGER NOT NULL DEFAULT 0,
+  \`body\` TEXT NOT NULL,
   \`link\` TEXT,
-  \`metadata\` TEXT,
+  \`read\` INTEGER NOT NULL DEFAULT 0,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -240,8 +286,7 @@ CREATE TABLE IF NOT EXISTS \`Notification\` (
 CREATE TABLE IF NOT EXISTS \`SiteConfig\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
   \`key\` TEXT NOT NULL UNIQUE,
-  \`value\` TEXT NOT NULL,
-  \`updatedAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  \`value\` TEXT NOT NULL
 );
 
 -- Tabla AuditLog
@@ -249,9 +294,9 @@ CREATE TABLE IF NOT EXISTS \`AuditLog\` (
   \`id\` TEXT PRIMARY KEY NOT NULL,
   \`userId\` TEXT,
   \`action\` TEXT NOT NULL,
-  \`entity\` TEXT NOT NULL,
+  \`entity\` TEXT,
   \`entityId\` TEXT,
-  \`metadata\` TEXT,
+  \`details\` TEXT,
   \`ip\` TEXT,
   \`createdAt\` TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -277,11 +322,49 @@ function parseSql(sql: string): string[] {
     });
 }
 
-export async function GET() {
-  const log: string[] = [];
-  const url = process.env.DATABASE_URL;
+// ─── Helper: extraer URL y authToken de DATABASE_URL ───
+// Acepta ambos formatos:
+//   a) libsql://xxx.turso.io?authToken=eyJxxx
+//   b) libsql://xxx.turso.io  +  variable separada TURSO_AUTH_TOKEN=eyJxxx
+function parseDatabaseUrl(rawUrl: string): {
+  url: string;
+  authToken: string | undefined;
+  hasTokenInUrl: boolean;
+  hasTokenEnv: boolean;
+} {
+  let url = rawUrl;
+  let authToken: string | undefined;
+  let hasTokenInUrl = false;
 
-  if (!url) {
+  if (url.includes("?authToken=") || url.includes("&authToken=")) {
+    try {
+      const urlObj = new URL(url);
+      authToken = urlObj.searchParams.get("authToken") ?? undefined;
+      // quitar el authToken de la URL para logging
+      urlObj.searchParams.delete("authToken");
+      url = urlObj.toString();
+      hasTokenInUrl = true;
+    } catch {
+      // si falla el parse, dejar URL original
+    }
+  }
+
+  // Si no había token en la URL, buscar en variable separada
+  const hasTokenEnv = !!process.env.TURSO_AUTH_TOKEN;
+  if (!authToken && process.env.TURSO_AUTH_TOKEN) {
+    authToken = process.env.TURSO_AUTH_TOKEN;
+  }
+
+  return { url, authToken, hasTokenInUrl, hasTokenEnv };
+}
+
+export async function GET(request: Request) {
+  const log: string[] = [];
+  const rawUrl = process.env.DATABASE_URL;
+  const { searchParams } = new URL(request.url);
+  const forceReset = searchParams.get("force") === "1";
+
+  if (!rawUrl) {
     return NextResponse.json(
       {
         status: "error",
@@ -292,38 +375,154 @@ export async function GET() {
     );
   }
 
-  log.push(`📍 DATABASE_URL: ${url.replace(/authToken=[^&]+/, "authToken=***")}`);
+  const { url, authToken, hasTokenInUrl, hasTokenEnv } = parseDatabaseUrl(rawUrl);
+
+  // ─── Detectar falta de authToken (CAUSA #1 del HTTP 401) ───
+  if ((url.startsWith("libsql://") || url.startsWith("libsql+ws://")) && !authToken) {
+    log.push("❌ ERROR DE AUTENTICACIÓN: Falta el authToken de Turso");
+    log.push(`📍 DATABASE_URL = ${url}`);
+    log.push(`📍 TURSO_AUTH_TOKEN = ${hasTokenEnv ? "(presente)" : "(NO configurada)"}`);
+    log.push("");
+    log.push("── CÓMO ARREGLARLO ──");
+    log.push("En Vercel → Settings → Environment Variables, editá DATABASE_URL y dejala así:");
+    log.push("");
+    log.push(`   ${url}?authToken=eyJhbGciOi...TU_TOKEN_REAL_AQUI`);
+    log.push("");
+    log.push("Para conseguir tu token,_andá a:");
+    log.push("   https://app.turso.com/app/tatabases → tu DB → Settings → Tokens");
+    log.push("   (creá un token nuevo con 'Create Token' si no tenés uno)");
+    log.push("");
+    log.push("Alternativamente, podés dejar DATABASE_URL sin token y crear otra variable:");
+    log.push("   TURSO_AUTH_TOKEN = eyJhbGciOi...TU_TOKEN_REAL_AQUI");
+    log.push("");
+    log.push("Después de cambiar las variables, esperá 1 min y volvé a cargar /api/setup.");
+
+    return NextResponse.json(
+      {
+        status: "error",
+        step: "auth_missing",
+        error: "HTTP 401 — Falta authToken de Turso en DATABASE_URL o variable TURSO_AUTH_TOKEN",
+        action_needed:
+          "En Vercel → Settings → Environment Variables: editá DATABASE_URL agregando '?authToken=TU_TOKEN' al final. Obtenelo en https://app.turso.com → tu DB → Settings → Tokens",
+        database_url_format: `${url}?authToken=TU_TOKEN_AQUI`,
+        turso_panel_url: "https://app.turso.com/app/tatabases",
+        log,
+      },
+      { status: 401 }
+    );
+  }
+
+  log.push(`📍 DATABASE_URL: ${url}`);
+  log.push(`🔑 Auth token: ${hasTokenInUrl ? "en URL (?authToken=)" : hasTokenEnv ? "en variable TURSO_AUTH_TOKEN" : "no necesario (SQLite local)"}`);
 
   try {
-    const client = createClient({ url });
+    const client = createClient({ url, authToken });
+
+    // ─── Paso 0 (opcional): Force reset — borrar tablas viejas con schema desactualizado ───
+    if (forceReset) {
+      log.push("⚠️ Paso 0: MODO FORCE — Borrando todas las tablas existentes...");
+      // Borrar foreign keys primero para evitar conflictos
+      try {
+        await client.execute("PRAGMA foreign_keys = OFF;");
+      } catch {}
+      const tableNames = [
+        "AuditLog", "SiteConfig", "Notification", "Report", "Transaction",
+        "Boost", "Subscription", "Message", "Conversation", "Favorite",
+        "Review", "Listing", "Subcategory", "Category", "VerificationToken",
+        "Session", "Account", "Plan", "User",
+      ];
+      // Intentar borrar cada tabla, ignorar errores
+      for (const table of tableNames) {
+        try {
+          await client.execute(`DROP TABLE IF EXISTS \`${table}\`;`);
+          log.push(`   🗑️ Tabla ${table} borrada`);
+        } catch (e: any) {
+          log.push(`   ⚠️ No se pudo borrar ${table}: ${e.message.substring(0, 60)}`);
+        }
+      }
+      // Segundo intento: tablas que pudieron quedar por FK
+      for (const table of tableNames) {
+        try {
+          await client.execute(`DROP TABLE IF EXISTS \`${table}\`;`);
+        } catch {}
+      }
+      try {
+        await client.execute("PRAGMA foreign_keys = ON;");
+      } catch {}
+      log.push("   ✅ Tablas viejas eliminadas");
+    }
 
     // ─── Paso 1: Crear todas las tablas ───
     log.push("🔧 Paso 1: Creando tablas...");
     const schemaStatements = parseSql(SCHEMA_SQL);
     let tablesCreated = 0;
     let tableErrors = 0;
+    let first401 = false;
 
     for (const stmt of schemaStatements) {
       try {
         await client.execute(stmt);
         tablesCreated++;
       } catch (e: any) {
+        const msg = e.message || "";
         // "table already exists" no es error real
-        if (!e.message.includes("already exists")) {
+        if (msg.includes("already exists")) {
+          // ignore
+        } else if (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("not authenticated")) {
+          first401 = true;
           tableErrors++;
-          log.push(`   ⚠️ ${e.message.substring(0, 100)}`);
+        } else {
+          tableErrors++;
+          if (tableErrors <= 3) log.push(`   ⚠️ ${msg.substring(0, 100)}`);
         }
       }
     }
     log.push(`   ✅ ${tablesCreated} tablas verificadas/creadas (${tableErrors} errores)`);
 
+    // ─── Si vemos 401 en cada query, es claro que el token es inválido ───
+    if (first401 || tableErrors >= 5) {
+      log.push("");
+      log.push("❌ DETECTADO: Errores 401 en TODAS las consultas");
+      log.push("Esto significa que el authToken es INVÁLIDO o EXPIRÓ.");
+      log.push("");
+      log.push("── SOLUCIÓN ──");
+      log.push("1. Andá a https://app.turso.com/app/tatabases");
+      log.push("2. Seleccioná tu DB (umpi-softw)");
+      log.push("3. Andá a Settings → Tokens → Create Token");
+      log.push("4. Copiá el token generado (empieza con 'eyJ...')");
+      log.push("5. En Vercel → Settings → Environment Variables:");
+      log.push("   Editá DATABASE_URL reemplazando el token viejo, o agregá:");
+      log.push("   TURSO_AUTH_TOKEN = <token nuevo>");
+      log.push("6. Esperá 1-2 min y volvé a cargar /api/setup");
+
+      return NextResponse.json(
+        {
+          status: "error",
+          step: "tables",
+          error: "HTTP 401 — authToken inválido o expirado",
+          action_needed:
+            "El token de Turso que pusiste en Vercel es inválido o expiró. Generá uno nuevo en https://app.turso.com → tu DB → Settings → Tokens → Create Token. Luego actualizá la variable DATABASE_URL o TURSO_AUTH_TOKEN en Vercel.",
+          turso_panel_url: "https://app.turso.com/app/tatabases",
+          log,
+        },
+        { status: 401 }
+      );
+    }
+
     // ─── Paso 2: Verificar si ya hay datos ───
     log.push("📊 Paso 2: Verificando datos existentes...");
     let userCount = 0;
+    let listingCount = 0;
+    let planCount = 0;
+    let categoryCount = 0;
     try {
       const result = await client.execute("SELECT COUNT(*) as count FROM User");
       userCount = Number(result.rows[0].count);
       log.push(`   📈 Usuarios actuales: ${userCount}`);
+      try { listingCount = Number((await client.execute("SELECT COUNT(*) as c FROM Listing")).rows[0].c); } catch {}
+      try { planCount = Number((await client.execute("SELECT COUNT(*) as c FROM Plan")).rows[0].c); } catch {}
+      try { categoryCount = Number((await client.execute("SELECT COUNT(*) as c FROM Category")).rows[0].c); } catch {}
+      log.push(`   📈 Listings: ${listingCount} | Plans: ${planCount} | Categories: ${categoryCount}`);
     } catch (e: any) {
       log.push(`   ❌ No se puede leer User: ${e.message}`);
       return NextResponse.json(
@@ -332,12 +531,42 @@ export async function GET() {
       );
     }
 
-    if (userCount > 0) {
-      log.push("✅ La base ya tiene datos. NO se carga nada.");
+    // ─── Detectar carga parcial (usuarios cargados pero otras tablas vacías) ───
+    // Esto pasa cuando se corrió setup con un schema viejo y se cargaron solo los INSERTs que no dependían de columnas faltantes.
+    if (userCount > 0 && (listingCount === 0 || planCount === 0 || categoryCount === 0) && !forceReset) {
+      log.push("");
+      log.push("⚠️ DETECTADO: Carga parcial de datos");
+      log.push(`   Hay ${userCount} usuarios pero faltan:`);
+      if (listingCount === 0) log.push("   · Listings (publicaciones)");
+      if (planCount === 0) log.push("   · Plans (planes de suscripción)");
+      if (categoryCount === 0) log.push("   · Categories (categorías)");
+      log.push("");
+      log.push("Esto ocurre cuando el schema está desactualizado (faltan columnas como 'type' en Category, etc.)");
+      log.push("");
+      log.push("── SOLUCIÓN ──");
+      log.push("Visitá esta URL para forzar reset completo (borra y recrea todas las tablas con schema correcto):");
+      log.push(`   ${request.url.split("?")[0]}?force=1`);
+      log.push("");
+      log.push("⚠️ ATENCIÓN: Esto borrará TODOS los datos actuales. Si tenés datos importantes, hacé backup primero.");
+
+      return NextResponse.json({
+        status: "partial_load_detected",
+        message:
+          "Detecté que el schema está desactualizado: hay usuarios pero faltan listings/planes/categorías. Visitá /api/setup?force=1 para recrear todo desde cero con el schema correcto.",
+        counts: { users: userCount, listings: listingCount, plans: planCount, categories: categoryCount },
+        fix_url: `${request.url.split("?")[0]}?force=1`,
+        warning: "Esto borrará TODOS los datos actuales y los volverá a cargar desde umpi_turso.sql",
+        log,
+      });
+    }
+
+    if (userCount > 0 && listingCount > 0 && planCount > 0 && categoryCount > 0) {
+      log.push("✅ La base ya tiene datos completos. NO se carga nada.");
       return NextResponse.json({
         status: "already_seeded",
-        message: `La base ya tiene ${userCount} usuarios. Todo listo.`,
+        message: `La base ya tiene ${userCount} usuarios, ${listingCount} listings, ${planCount} planes, ${categoryCount} categorías. Todo listo.`,
         userCount,
+        counts: { users: userCount, listings: listingCount, plans: planCount, categories: categoryCount },
         log,
       });
     }
