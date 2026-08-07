@@ -1,0 +1,408 @@
+// UMPI Marketplace - Prisma Schema para MySQL (Producción GoDaddy)
+// Este schema es para usar en producción con MySQL.
+// Instrucciones:
+//   1. Copiar este archivo como prisma/schema.prisma (reemplazando el de sqlite)
+//   2. Configurar DATABASE_URL en .env con las credenciales de MySQL de GoDaddy
+//   3. Ejecutar: npx prisma db push   (crea las tablas)
+//   4. Importar el dump SQL:  mysql -u USER -p DB < database/umpi_data.sql
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── USUARIOS ───────────────────────────
+
+model User {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  email          String   @unique @db.VarChar(255)
+  name           String?  @db.VarChar(100)
+  lastName       String?  @db.VarChar(100)
+  passwordHash   String?  @db.VarChar(255)
+  image          String?  @db.VarChar(500)
+  phone          String?  @db.VarChar(30)
+  zone           String?  @db.VarChar(100)
+  bio            String?  @db.Text
+  avatarInitials String?  @db.VarChar(5)
+  role           String   @default("user") @db.VarChar(20) // user | admin
+  plan           String   @default("basico") @db.VarChar(20) // basico | pro | business
+  verified       Boolean  @default(false)
+  banned         Boolean  @default(false)
+  memberSince    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  listings       Listing[]
+  reviews        Review[]
+  favorites      Favorite[]
+  conversations  Conversation[]      @relation("ConvParticipants")
+  messages       Message[]
+  subscriptions  Subscription[]
+  transactions   Transaction[]
+  reports        Report[]            @relation("ReporterReports")
+  reportsAgainst Report[]            @relation("ReportedReports")
+  boosts         Boost[]
+  notifications  Notification[]
+  sessions       Session[]
+  accounts       Account[]
+}
+
+// ─────────────────────────── NEXTAUTH ───────────────────────────
+
+model Account {
+  id                String  @id @default(cuid()) @db.VarChar(30)
+  userId            String  @db.VarChar(30)
+  type              String  @db.VarChar(50)
+  provider          String  @db.VarChar(50)
+  providerAccountId String  @db.VarChar(100)
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String? @db.VarChar(50)
+  scope             String? @db.VarChar(255)
+  id_token          String? @db.Text
+  session_state     String? @db.VarChar(255)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  sessionToken String   @unique @db.VarChar(255)
+  userId       String   @db.VarChar(30)
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String   @db.VarChar(255)
+  token      String   @unique @db.VarChar(255)
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────── CATEGORÍAS ───────────────────────────
+
+model Category {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  slug        String   @unique @db.VarChar(100)
+  name        String   @db.VarChar(100)
+  type        String   @db.VarChar(20) // servicio | auto | propiedad
+  icon        String?  @db.VarChar(50)
+  description String?  @db.Text
+  count       Int      @default(0)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  listings    Listing[]
+  subcategories Subcategory[]
+
+  @@index([type])
+}
+
+model Subcategory {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  categoryId String   @db.VarChar(30)
+  name       String   @db.VarChar(100)
+  slug       String   @db.VarChar(100)
+  count      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  listings   Listing[]
+
+  @@unique([categoryId, slug])
+  @@index([categoryId])
+}
+
+// ─────────────────────────── PUBLICACIONES ───────────────────────────
+
+model Listing {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  slug         String   @unique @db.VarChar(255)
+  title        String   @db.VarChar(255)
+  description  String   @db.LongText
+  categoryType String   @db.VarChar(20) // servicio | auto | propiedad
+  categoryId   String?  @db.VarChar(30)
+  subcategoryId String? @db.VarChar(30)
+  price        Float
+  currency     String   @default("ARS") @db.VarChar(10) // ARS | USD
+  priceUnit    String?  @db.VarChar(20) // hora | dia | mes | unico | null
+  location     String?  @db.VarChar(255)
+  zone         String?  @db.VarChar(100)
+  province     String?  @db.VarChar(100)
+  images       String   @default("[]") @db.Text // JSON array de URLs
+  thumbs       String   @default("[]") @db.Text // JSON array de thumbnail URLs
+  attrs        String   @default("{}") @db.Text // JSON object con atributos específicos
+  rating       Float    @default(0)
+  reviewCount  Int      @default(0)
+  views        Int      @default(0)
+  contactCount Int      @default(0)
+  badge        String?  @db.VarChar(20) // featured | hot | new | null
+  featured     Boolean  @default(false)
+  featuredUntil DateTime?
+  boostLevel   Int      @default(0) // 0=ninguno, 1=destacado, 2=top, 3=premium destacado
+  status       String   @default("active") @db.VarChar(20)
+  rejectionReason String? @db.Text
+  sellerId     String   @db.VarChar(30)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  seller       User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  category     Category? @relation(fields: [categoryId], references: [id])
+  subcategory  Subcategory? @relation(fields: [subcategoryId], references: [id])
+  reviews      Review[]
+  favorites    Favorite[]
+  conversations Conversation[]
+  reports      Report[]
+  boosts       Boost[]
+
+  @@index([categoryType])
+  @@index([sellerId])
+  @@index([status])
+  @@index([featured])
+  @@index([createdAt])
+}
+
+// ─────────────────────────── RESEÑAS ───────────────────────────
+
+model Review {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  listingId  String   @db.VarChar(30)
+  userId     String   @db.VarChar(30)
+  rating     Int      // 1-5
+  comment    String   @db.Text
+  status     String   @default("active") @db.VarChar(20)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  listing    Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, userId])
+  @@index([listingId])
+  @@index([userId])
+}
+
+// ─────────────────────────── FAVORITOS ───────────────────────────
+
+model Favorite {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  userId    String   @db.VarChar(30)
+  listingId String   @db.VarChar(30)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@index([userId])
+}
+
+// ─────────────────────────── MENSAJERÍA ───────────────────────────
+
+model Conversation {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  listingId   String?  @db.VarChar(30)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  listing     Listing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  participants User[]  @relation("ConvParticipants")
+  messages    Message[]
+
+  @@index([listingId])
+}
+
+model Message {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  conversationId String   @db.VarChar(30)
+  senderId       String   @db.VarChar(30)
+  content        String   @db.Text
+  read           Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([createdAt])
+}
+
+// ─────────────────────────── SUSCRIPCIONES ───────────────────────────
+
+model Subscription {
+  id            String   @id @default(cuid()) @db.VarChar(30)
+  userId        String   @db.VarChar(30)
+  plan          String   @db.VarChar(20) // basico | pro | business
+  status        String   @default("active") @db.VarChar(20)
+  startDate     DateTime @default(now())
+  currentPeriodEnd DateTime?
+  cancelAtPeriodEnd Boolean @default(false)
+  mercadopagoId String?  @db.VarChar(100)
+  mercadopagoPreapprovalId String? @db.VarChar(100)
+  amount        Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ─────────────────────────── BOOSTS / DESTACADOS ───────────────────────────
+
+model Boost {
+  id            String   @id @default(cuid()) @db.VarChar(30)
+  listingId     String   @db.VarChar(30)
+  userId        String   @db.VarChar(30)
+  type          String   @db.VarChar(30) // destacado | top | premium_destacado
+  durationDays  Int
+  amount        Float
+  status        String   @default("pending") @db.VarChar(20)
+  startDate     DateTime?
+  endDate       DateTime?
+  mercadopagoPaymentId String? @db.VarChar(100)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  listing       Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+
+  @@index([listingId])
+  @@index([status])
+}
+
+// ─────────────────────────── TRANSACCIONES ───────────────────────────
+
+model Transaction {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  txId           String   @unique @db.VarChar(50) // TXN-XXXX
+  userId         String   @db.VarChar(30)
+  subscriptionId String?  @db.VarChar(30)
+  boostId        String?  @db.VarChar(30)
+  concept        String   @db.VarChar(255)
+  method         String   @db.VarChar(30) // mercadopago | tarjeta | transferencia
+  amount         Float
+  currency       String   @default("ARS") @db.VarChar(10)
+  status         String   @default("pending") @db.VarChar(20)
+  mercadopagoPaymentId String? @db.VarChar(100)
+  mercadopagoPreferenceId String? @db.VarChar(100)
+  invoiceType    String?  @db.VarChar(5) // A | B | C (Factura)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  boost          Boost?       @relation(fields: [boostId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// ─────────────────────────── REPORTES / MODERACIÓN ───────────────────────────
+
+model Report {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  reporterId  String   @db.VarChar(30)
+  reportedUserId String? @db.VarChar(30)
+  listingId   String?  @db.VarChar(30)
+  reason      String   @db.VarChar(50)
+  description String?  @db.Text
+  status      String   @default("open") @db.VarChar(20)
+  resolution  String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  reporter    User      @relation("ReporterReports", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedUser User?    @relation("ReportedReports", fields: [reportedUserId], references: [id], onDelete: SetNull)
+  listing     Listing?  @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([listingId])
+}
+
+// ─────────────────────────── NOTIFICACIONES ───────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  userId    String   @db.VarChar(30)
+  type      String   @db.VarChar(30)
+  title     String   @db.VarChar(255)
+  body      String   @db.Text
+  link      String?  @db.VarChar(255)
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+}
+
+// ─────────────────────────── PLANES PREMIUM ───────────────────────────
+
+model Plan {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  slug        String   @unique @db.VarChar(50)
+  name        String   @db.VarChar(100)
+  price       Float
+  currency    String   @default("ARS") @db.VarChar(10)
+  interval    String   @default("month") @db.VarChar(20)
+  description String?  @db.Text
+  features    String   @default("[]") @db.Text // JSON array de strings
+  maxListings Int      @default(1)
+  maxFeatured Int      @default(0)
+  badgeVerified Boolean @default(false)
+  top10Access Boolean  @default(false)
+  multiUser   Int      @default(1)
+  apiAccess   Boolean  @default(false)
+  prioritySupport Boolean @default(false)
+  monthlyReport Boolean @default(false)
+  invoiceType String?  @db.VarChar(5)
+  active      Boolean  @default(true)
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─────────────────────────── CONFIGURACIÓN SITIO ───────────────────────────
+
+model SiteConfig {
+  id    String @id @default(cuid()) @db.VarChar(30)
+  key   String @unique @db.VarChar(100)
+  value String @db.LongText
+}
+
+// ─────────────────────────── LOGS DE AUDITORÍA ───────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  userId    String?  @db.VarChar(30)
+  action    String   @db.VarChar(100)
+  entity    String?  @db.VarChar(50)
+  entityId  String?  @db.VarChar(30)
+  details   String?  @db.Text
+  ip        String?  @db.VarChar(45)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
