@@ -150,9 +150,12 @@ function toStr(v: unknown): string {
 /** Parsea un campo JSON (TEXT) de forma segura. */
 export function safeJsonParse<T>(raw: unknown, fallback: T): T {
   if (raw === null || raw === undefined) return fallback;
+  // Si ya es un array u objeto parseado, devolverlo tal cual
+  if (Array.isArray(raw)) return raw as unknown as T;
+  if (typeof raw === "object" && raw.constructor === Object) return raw as unknown as T;
+  if (typeof raw !== "string") return fallback;
   try {
-    const s = typeof raw === "string" ? raw : String(raw);
-    return JSON.parse(s) as T;
+    return JSON.parse(raw) as T;
   } catch {
     return fallback;
   }
