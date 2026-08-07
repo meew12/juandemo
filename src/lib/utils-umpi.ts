@@ -64,7 +64,6 @@ export function timeAgo(date: Date | string | number): string {
   } else if (typeof date === "number") {
     d = new Date(date);
   } else if (typeof date === "string") {
-    // Handle both ISO strings ("2025-01-15T...") and epoch ms strings ("1785711010969")
     const trimmed = date.trim();
     if (/^\d+$/.test(trimmed)) {
       d = new Date(parseInt(trimmed, 10));
@@ -75,7 +74,6 @@ export function timeAgo(date: Date | string | number): string {
     d = new Date();
   }
 
-  // If the date is invalid, return a fallback instead of "hace NaN año"
   if (isNaN(d.getTime())) return "hace un momento";
 
   const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
@@ -95,8 +93,12 @@ export function timeAgo(date: Date | string | number): string {
   return `hace ${years} año${years > 1 ? "s" : ""}`;
 }
 
-export function safeJsonParse<T>(value: string | null | undefined, fallback: T): T {
-  if (!value) return fallback;
+export function safeJsonParse<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  // Si ya es un array u objeto parseado, devolverlo tal cual
+  if (Array.isArray(value)) return value as unknown as T;
+  if (typeof value === "object" && value.constructor === Object) return value as unknown as T;
+  if (typeof value !== "string") return fallback;
   try {
     return JSON.parse(value) as T;
   } catch {
